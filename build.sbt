@@ -36,6 +36,7 @@ libraryDependencies ++= {
     "io.spray"                %   "spray-client"           % sprayVersion,
     "io.spray"                %%  "spray-json"             % "1.2.4",
     "com.github.nscala-time"  %%  "nscala-time"            % "0.4.2",
+    "com.google.protobuf"     %   "protobuf-java"          % "2.4.1",
     "ch.qos.logback"          %   "logback-classic"        % "1.0.13"       % "provided",
     "com.typesafe.akka"       %%  "akka-testkit"           % akkaVersion    % "test",
     "io.spray"                %   "spray-testkit"          % sprayVersion   % "test",
