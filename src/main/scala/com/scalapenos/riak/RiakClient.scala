@@ -17,6 +17,8 @@
 package com.scalapenos.riak
 
 import akka.actor._
+import com.scalapenos.riak.internal.protobuf.{RiakPBClient, RiakPBClientHelper}
+import com.scalapenos.riak.RiakClient.{ProtoBuf, Http, Protocol}
 
 
 // ============================================================================
@@ -25,17 +27,25 @@ import akka.actor._
 
 object RiakClient {
   private val defaultHost = "localhost"
-  private val defaultPort = 8098
+  private val defaultHttpPort = 8098
+  private val defaultProtoBufPort = 8087
+  
   private lazy val internalSystem = ActorSystem("riak-client")
 
-  def apply()                                             : RiakClient = RiakClientExtension(internalSystem).connect(defaultHost, defaultPort)
-  def apply(host: String, port: Int)                      : RiakClient = RiakClientExtension(internalSystem).connect(host, port)
-  def apply(url: String)                                  : RiakClient = RiakClientExtension(internalSystem).connect(url)
-  def apply(url: java.net.URL)                            : RiakClient = RiakClientExtension(internalSystem).connect(url)
-  def apply(system: ActorSystem)                          : RiakClient = RiakClientExtension(system).connect(defaultHost, defaultPort)
-  def apply(system: ActorSystem, host: String, port: Int) : RiakClient = RiakClientExtension(system).connect(host, port)
-  def apply(system: ActorSystem, url: String)             : RiakClient = RiakClientExtension(system).connect(url)
-  def apply(system: ActorSystem, url: java.net.URL)       : RiakClient = RiakClientExtension(system).connect(url)
+  def apply()                                                                        : RiakClient = RiakClientExtension(internalSystem).connect(defaultHost, defaultHttpPort, Http)
+  def apply(protocol: Protocol)                                                      : RiakClient = RiakClientExtension(internalSystem).connect(defaultHost, defaultHttpPort, protocol)
+  def apply(host: String, port: Int, protocol: Protocol)                             : RiakClient = RiakClientExtension(internalSystem).connect(host, port, protocol)
+  def apply(url: String, protocol: Protocol)                                         : RiakClient = RiakClientExtension(internalSystem).connect(url, protocol)
+  def apply(url: java.net.URL, protocol: Protocol)                                   : RiakClient = RiakClientExtension(internalSystem).connect(url, protocol)
+
+  def apply(system: ActorSystem, protocol: Protocol = Http)                          : RiakClient = RiakClientExtension(system).connect(defaultHost, defaultHttpPort, protocol)
+  def apply(system: ActorSystem, host: String, port: Int, protocol: Protocol)        : RiakClient = RiakClientExtension(system).connect(host, port, protocol)
+  def apply(system: ActorSystem, url: String, protocol: Protocol)                    : RiakClient = RiakClientExtension(system).connect(url, protocol)
+  def apply(system: ActorSystem, url: java.net.URL, protocol: Protocol)              : RiakClient = RiakClientExtension(system).connect(url, protocol)
+
+  sealed trait Protocol
+  case object Http extends Protocol
+  case object ProtoBuf extends Protocol
 }
 
 trait RiakClient {
@@ -62,10 +72,15 @@ class RiakClientExtension(system: ExtendedActorSystem) extends Extension {
 
   private[riak] val settings = new RiakClientSettings(system.settings.config)
   private[riak] lazy val httpHelper = new RiakHttpClientHelper(system)
+  private[riak] lazy val pbcHelper = new RiakPBClientHelper(system)
 
-  def connect(url: String): RiakClient = connect(RiakServerInfo(url))
-  def connect(url: java.net.URL): RiakClient = connect(RiakServerInfo(url))
-  def connect(host: String, port: Int): RiakClient = connect(RiakServerInfo(host, port))
+  def connect(url: String, protocol: Protocol): RiakClient = connect(RiakServerInfo(url), protocol)
+  def connect(url: java.net.URL, protocol: Protocol): RiakClient = connect(RiakServerInfo(url), protocol)
+  def connect(host: String, port: Int, protocol: Protocol): RiakClient = connect(RiakServerInfo(host, port), protocol)
 
-  private def connect(server: RiakServerInfo): RiakClient = new RiakHttpClient(httpHelper, server)
+  private def connect(server: RiakServerInfo, protocol: Protocol): RiakClient =
+    protocol match {
+      case Http     => new RiakHttpClient(httpHelper, server)
+      case ProtoBuf => new RiakPBClient(pbcHelper)
+    }
 }
