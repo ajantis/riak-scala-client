@@ -77,7 +77,6 @@ private[riak] final class RiakPBClientHelper(system: ActorSystem, server: RiakSe
     }
 
   def fetch(bucket: String, key: String, resolver: RiakConflictsResolver): Future[Option[RiakValue]] = {
-    println(s"Fetching key $key")
     val request = RiakPBRequest(PBCMsgTypes.RpbGetReq, RpbGetReq(bucket, key))
     sendRequest(request).flatMap {
       case Right(result) =>
@@ -124,7 +123,6 @@ private[riak] final class RiakPBClientHelper(system: ActorSystem, server: RiakSe
     sendRequest(request).flatMap {
       case Right(result) =>
         val riakResponse = result.as(RpbIndexResp())
-        println(s"Range seach results: ${riakResponse.`keys`.toList.map(byteStringToString)}")
         Future.traverse(riakResponse.`keys`.toList)(fetch(bucket, _, resolver)).map(_.flatten)
 
       case Left(errorMsg) =>
