@@ -21,7 +21,7 @@ import com.scalapenos.riak.{RiakConflictsResolver, RiakClient}
 
 private[riak] final class RiakPBClient(helper: RiakPBClientHelper) extends RiakClient {
 
-  def ping = helper.ping()
+  def ping = helper.ping
 
   def bucket(name: String, resolver: RiakConflictsResolver) = new RiakPBBucket(helper, name, resolver)
 }
