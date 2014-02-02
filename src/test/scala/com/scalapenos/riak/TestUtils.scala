@@ -30,7 +30,7 @@ trait RiakClientSpecification extends AkkaActorSystemSpecification with Before {
   var client: RiakClient = _
 
   def before {
-    client = RiakClient(system)
+    client = RiakClient(system, protocol = RiakClient.ProtoBuf)
   }
 
   skipAllUnless(RiakClient(system).ping.await)
