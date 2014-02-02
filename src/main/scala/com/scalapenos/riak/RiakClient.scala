@@ -18,7 +18,7 @@ package com.scalapenos.riak
 
 import akka.actor._
 import com.scalapenos.riak.internal.protobuf.{RiakPBClient, RiakPBClientHelper}
-import com.scalapenos.riak.RiakClient.{ProtoBuf, Http, Protocol}
+import com.scalapenos.riak.Protocol.{ProtoBuf, Http}
 
 
 // ============================================================================
@@ -41,7 +41,11 @@ object RiakClient {
   def apply(system: ActorSystem, url: String, protocol: Protocol)              : RiakClient = RiakClientExtension(system).connect(url, protocol)
   def apply(system: ActorSystem, url: java.net.URL, protocol: Protocol)        : RiakClient = RiakClientExtension(system).connect(url, protocol)
 
-  sealed abstract class Protocol
+}
+
+sealed abstract class Protocol
+
+object Protocol {
   case object Http extends Protocol
   case object ProtoBuf extends Protocol
 }

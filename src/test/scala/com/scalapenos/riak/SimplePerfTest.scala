@@ -2,7 +2,7 @@ package com.scalapenos.riak
 
 import spray.util._
 import akka.actor.ActorSystem
-import com.scalapenos.riak.RiakClient.{ ProtoBuf, Http, Protocol }
+import com.scalapenos.riak.Protocol.{ProtoBuf, Http}
 
 object SimplePerfTest extends App {
   val system = ActorSystem()

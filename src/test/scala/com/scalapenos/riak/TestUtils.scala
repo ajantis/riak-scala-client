@@ -10,6 +10,7 @@ import org.specs2.execute.{Failure, FailureException}
 import org.specs2.specification.{Fragments, Step}
 import org.specs2.time.NoTimeConversions
 
+import Protocol.ProtoBuf
 
 trait AkkaActorSystemSpecification extends Specification with NoTimeConversions {
   implicit val system = ActorSystem("tests")
@@ -30,7 +31,7 @@ trait RiakClientSpecification extends AkkaActorSystemSpecification with Before {
   var client: RiakClient = _
 
   def before {
-    client = RiakClient(system, protocol = RiakClient.ProtoBuf)
+    client = RiakClient(system, protocol = ProtoBuf)
   }
 
   skipAllUnless(RiakClient(system).ping.await)
