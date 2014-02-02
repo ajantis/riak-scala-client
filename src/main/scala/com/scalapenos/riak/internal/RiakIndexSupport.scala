@@ -55,7 +55,6 @@ private[riak] trait RiakIndexSupport {
   private[riak] case class RiakIndexQueryResponse(keys: List[String])
 
   private[riak] object RiakIndexQueryResponse {
-    import spray.json._
     import spray.json.DefaultJsonProtocol._
 
     implicit val format = jsonFormat1(RiakIndexQueryResponse.apply)
