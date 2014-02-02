@@ -18,19 +18,20 @@ package com.scalapenos.riak
 package internal.protobuf
 
 import com.scalapenos.riak.{RiakBucket, RiakBucketProperty, RiakValue, RiakIndex}
-import com.scalapenos.riak.internal.RiakIndexRange
+import com.scalapenos.riak.internal.{RiakServerInfo, RiakIndexRange}
 
-private[riak] final class RiakPBBucket(val helper: RiakPBClientHelper,
+private[riak] final class RiakPBBucket(helper: RiakPBClientHelper,
                                        val name: String,
                                        val resolver: RiakConflictsResolver) extends RiakBucket {
-
   def fetch(key: String) = helper.fetch(name, key, resolver)
+  def fetch(index: RiakIndex) = helper.fetch(name, index, resolver)
+  def fetch(indexRange: RiakIndexRange) = helper.fetch(name, indexRange, resolver)
+
   def storeAndFetch(key: String, value: RiakValue) = helper.storeAndFetch(name, key, value, resolver)
+  def store(key: String, value: RiakValue) = helper.store(name, key, value, resolver)
+
   def delete(key: String) = helper.delete(name, key)
 
-  def fetch(index: RiakIndex) = null // TODO
-  def fetch(indexRange: RiakIndexRange) = null // TODO
-  def store(key: String, value: RiakValue) = null // TODO
-  def properties = null // TODO
-  def properties_=(newProperties: Set[RiakBucketProperty[_]]) = null // TODO
+  def properties = helper.getBucketProperties(name)
+  def properties_=(newProperties: Set[RiakBucketProperty[_]]) = helper.setBucketProperties(name, newProperties)
 }
