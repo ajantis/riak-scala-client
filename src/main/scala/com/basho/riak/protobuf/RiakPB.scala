@@ -809,5 +809,4 @@ object RpbBucketProps {
 object RiakPB {
   def registerAllExtensions(registry: com.google.protobuf.ExtensionRegistryLite) {
   }
-
 }
