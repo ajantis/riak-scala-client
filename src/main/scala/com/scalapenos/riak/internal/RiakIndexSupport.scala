@@ -21,7 +21,11 @@ import RiakHttpHeaders._
 
 
 private[riak] object RiakIndexSupport {
-  val IndexNameAndType = (indexHeaderPrefix + "(.+)_(bin|int)$").r
+  val LongIndexSuffix = "int"
+  val StringIndexSuffix = "bin"
+
+  val IndexNameAndType = s"(.+)_($StringIndexSuffix|$LongIndexSuffix)$$".r
+  val IndexHeaderNameAndType = (indexHeaderPrefix + IndexNameAndType).r
 }
 
 private[riak] trait RiakIndexSupport {
@@ -41,14 +45,14 @@ private[riak] trait RiakIndexSupport {
       val values = header.value.split(',')
 
       header.lowercaseName match {
-        case IndexNameAndType(name, "int") => values.map(value => RiakIndex(name, value.trim.toLong)).toSet
-        case IndexNameAndType(name, "bin") => values.map(value => RiakIndex(name, value.trim)).toSet
+        case IndexHeaderNameAndType(name, LongIndexSuffix) => values.map(value => RiakIndex(name, value.trim.toLong)).toSet
+        case IndexHeaderNameAndType(name, StringIndexSuffix) => values.map(value => RiakIndex(name, value.trim)).toSet
         case _                             => Set.empty[RiakIndex]
       }
     }
 
     headers.filter(_.lowercaseName.startsWith(indexHeaderPrefix))
-           .flatMap(toRiakIndex(_))
+           .flatMap(toRiakIndex)
            .toSet
   }
 
