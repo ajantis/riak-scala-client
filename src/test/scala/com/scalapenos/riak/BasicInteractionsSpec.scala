@@ -16,11 +16,10 @@
 
 package com.scalapenos.riak
 
-class BasicInteractionsSpec extends AkkaActorSystemSpecification {
+class BasicInteractionsSpec extends RiakClientSpecification {
   "The riak client" should {
     "be able to perform a simple get-put-get-delete-get CRUD flow" in {
-      val connection = RiakClient(system)
-      val bucket = connection.bucket("test-basic-interaction")
+      val bucket = client.bucket("test-basic-interaction")
 
       val fetchBeforeStore = bucket.fetch("foo")
 
