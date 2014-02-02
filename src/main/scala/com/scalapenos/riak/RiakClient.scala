@@ -36,7 +36,7 @@ object RiakClient {
   def apply(url: String, protocol: Protocol)                                   : RiakClient = RiakClientExtension(internalSystem).connect(url, protocol)
   def apply(url: java.net.URL, protocol: Protocol)                             : RiakClient = RiakClientExtension(internalSystem).connect(url, protocol)
 
-  def apply(system: ActorSystem, protocol: Protocol = ProtoBuf)                : RiakClient = RiakClientExtension(system).connect(defaultHost, protocol)
+  def apply(system: ActorSystem, protocol: Protocol = Http)                    : RiakClient = RiakClientExtension(system).connect(defaultHost, protocol)
   def apply(system: ActorSystem, host: String, port: Int, protocol: Protocol)  : RiakClient = RiakClientExtension(system).connect(host, port, protocol)
   def apply(system: ActorSystem, url: String, protocol: Protocol)              : RiakClient = RiakClientExtension(system).connect(url, protocol)
   def apply(system: ActorSystem, url: java.net.URL, protocol: Protocol)        : RiakClient = RiakClientExtension(system).connect(url, protocol)
