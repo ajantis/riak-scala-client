@@ -15,263 +15,314 @@
  */
 
 package com.scalapenos.riak
-package internal.protobuf
+package internal
 
-import akka.io._
+package protobuf
+
 import akka.actor._
-import akka.util.{Timeout, ByteStringBuilder, ByteString}
+import akka.util.Timeout
 import akka.pattern.ask
 
-import java.net.InetSocketAddress
-import akka.io.IO
 import scala.concurrent.Future
-
-import com.basho.riak.protobuf._
+import scala.util.{Left, Right}
 
 import serialization.PBConversions._
-import com.scalapenos.riak.internal.DateTimeSupport._
+import org.parboiled.common.Base64
+
+import com.basho.riak.protobuf._
+import com.google.protobuf.{ByteString => PBByteString}
+import akka.routing.{DefaultResizer, RoundRobinRouter}
+import akka.actor.SupervisorStrategy.{Resume, Restart}
+
 import scala.concurrent.duration._
-import com.scalapenos.riak.ETag
-import com.scalapenos.riak.BucketOperationFailed
-import scala.util.Failure
-import com.scalapenos.riak.VClock
-import com.scalapenos.riak.ConflictResolution
-import scala.util.Success
 
-private[riak] final class RiakPBClientHelper(actorSystem: ActorSystem) {
-  implicit val system = actorSystem
 
-  def clientActor: ActorRef = system.actorOf(Props[PBClientActor])
-
+private[riak] final class RiakPBClientHelper(system: ActorSystem, server: RiakServerInfo) {
   import system.dispatcher
 
+  private val settings = RiakClientExtension(system).settings
 
-  implicit val timeout = Timeout(6.seconds)
+  implicit val timeout = Timeout(settings.DefaultFutureTimeout)
 
-  def ping(): Future[Boolean] = {
-    val response: Future[RiakPBResponse] = (clientActor ? RiakPBRequest(PBCMsgTypes.RpbPingReq)).mapTo[RiakPBResponse]
-    response.map(_.msgType == PBCMsgTypes.RpbPingResp)
-  }
+  // Used to encode/decode Riak VClocks
+  private val base64 = Base64.rfc2045()
+
+  // Default values for Riak
+  private val DefaultNumberOfReplicas = 3
+  private val DefaultLastWriteWins    = false
+  private val DefaultAllowMult        = false
+
+  // Type alias for convenience: we get from Riak PB interface either String message with error or a response object
+  private type RiakReply = Either[String, RiakPBResponse]
+
+  val clientSupervisorStrategy =
+    OneForOneStrategy(maxNrOfRetries = settings.MaxNumberOfProtobufRetries, withinTimeRange = 2.seconds) {
+      case _ => Restart
+    }
+
+  private val resizer = DefaultResizer(
+      lowerBound        = settings.MinNumberProtobufConnections,
+      upperBound        = settings.MaxNumberProtobufConnections,
+      messagesPerResize = settings.ProtobufQueueBeforeResizingPool)
+
+  private val clientActor: ActorRef =
+    system.actorOf(
+      Props(classOf[PBClientActor], server, settings.ProtobufConnectionIdleTimeout)
+        .withRouter(RoundRobinRouter(supervisorStrategy = clientSupervisorStrategy, resizer = Some(resizer))))
+
+  def ping: Future[Boolean] =
+    sendRequest(RiakPBRequest(PBCMsgTypes.RpbPingReq)).map {
+      case Right(r) if r.msgType == PBCMsgTypes.RpbPingResp => true
+      case _                                                => false
+    }
 
   def fetch(bucket: String, key: String, resolver: RiakConflictsResolver): Future[Option[RiakValue]] = {
-    val response: Future[RiakPBResponse] =
-      (clientActor ? RiakPBRequest(PBCMsgTypes.RpbGetReq, RpbGetReq(bucket = bucket, key = key))).mapTo[RiakPBResponse]
+    println(s"Fetching key $key")
+    val request = RiakPBRequest(PBCMsgTypes.RpbGetReq, RpbGetReq(bucket, key))
+    sendRequest(request).flatMap {
+      case Right(result) =>
+        val riakResponse = result.as(RpbGetResp())
+        val values = riakResponse.`content`.toList
 
-    response.map { r =>
-      val tryR = responseToTry(r)
-      tryR match {
-        case Success(r) =>
-          val riakResponse = RpbGetResp().mergeFrom(r.body.toArray)
-          riakResponse.`content`.toList match {
-            case Nil => None
+        values.size match {
+          // Empty or single result
+          case i if i < 2 =>
+            Future.successful(values.headOption.map { v => toRiakValue(v, extractVClock(riakResponse.`vclock`)) })
 
-            case x :: Nil => Some(toRiakValue(x))
+          // Conflict (multiple values) and there is a VClock to resolve it
+          case _ if riakResponse.`vclock`.isDefined =>
+            resolveConflict(bucket, key, extractVClock(riakResponse.`vclock`).get, values, resolver).map(Some.apply)
 
-            case l @ (x :: xs) =>
-              val ConflictResolution(resolvedValue, _) = resolver.resolve(l.map(toRiakValue(_)).toSet)
-              Some(resolvedValue)
-          }
+          // No VClock is provided
+          case _ =>
+            throw new BucketOperationFailed("Received a wrong response from Riak: missing vClock field.")
+        }
 
-        case Failure(f) => throw new BucketOperationFailed(s"Fetch for key '$key' in bucket '$bucket' produced an unexpected response error '$f'.")
-      }
+      case Left(errorMsg) =>
+        throw new BucketOperationFailed(s"Fetch for key '$key' in bucket '$bucket' produced an unexpected response error '$errorMsg'.")
     }
   }
 
+  def fetch(bucket: String, index: RiakIndex, resolver: RiakConflictsResolver): Future[List[RiakValue]] = {
+    val request = RiakPBRequest(PBCMsgTypes.RpbIndexReq, RpbIndexReq(`bucket` = bucket, `index` = index.fullName, `stream` = Some(false),
+      `key` = Some(index.value.toString), `qtype` = RpbIndexReq.IndexQueryType.eq))
+
+    sendRequest(request).flatMap {
+      case Right(result) =>
+        val riakResponse = result.as(RpbIndexResp())
+        Future.traverse(riakResponse.`keys`.toList)(fetch(bucket, _, resolver)).map(_.flatten)
+     
+      case Left(errorMsg) => 
+        throw new BucketOperationFailed(s"Fetch for index '${index.name}' in bucket '$bucket' produced an unexpected response error '$errorMsg'.")      
+    }
+  }
+
+  def fetch(bucket: String, indexRange: RiakIndexRange, resolver: RiakConflictsResolver): Future[List[RiakValue]] = {
+    val request = RiakPBRequest(PBCMsgTypes.RpbIndexReq, RpbIndexReq(`bucket` = bucket, `index` = indexRange.fullName, `stream` = Some(false),
+      `rangeMin` = Some(indexRange.start.toString), `rangeMax` = Some(indexRange.end.toString), `qtype` = RpbIndexReq.IndexQueryType.range))
+
+    sendRequest(request).flatMap {
+      case Right(result) =>
+        val riakResponse = result.as(RpbIndexResp())
+        println(s"Range seach results: ${riakResponse.`keys`.toList.map(byteStringToString)}")
+        Future.traverse(riakResponse.`keys`.toList)(fetch(bucket, _, resolver)).map(_.flatten)
+
+      case Left(errorMsg) =>
+        throw new BucketOperationFailed(s"Fetch for index '${indexRange.name}' in range <${indexRange.start}; ${indexRange.end}> in bucket '$bucket' produced an unexpected response error '$errorMsg'.")
+    }
+  }  
+
   def storeAndFetch(bucket: String, key: String, value: RiakValue, resolver: RiakConflictsResolver): Future[RiakValue] = {
-    val response: Future[RiakPBResponse] =
-      (clientActor ? RiakPBRequest(PBCMsgTypes.RpbPutReq,
-        RpbPutReq(bucket = bucket, key = Some(key), `returnBody` = Some(true), content = toRbpContent(value)))).mapTo[RiakPBResponse]
+    if (value.data.isEmpty) {
+      throw new BucketOperationFailed("Empty Riak value data provided") // to be consistent with HTTP API behavior.
+    }
 
-    response.map { r =>
-      val tryR = responseToTry(r)
-      tryR match {
-        case Success(r) =>
-          val riakResponse = RpbPutResp().mergeFrom(r.body.toArray)
-          riakResponse.`content`.toList match {
-            case Nil => throw new Exception("Write is not successful")
+    val request = RiakPBRequest(PBCMsgTypes.RpbPutReq, RpbPutReq(`bucket` = bucket, `key` = Some(key),
+      `vclock` = toRpbVClock(value.vclock), `returnBody` = Some(true), content = toRbpContent(value)))
 
-            case x :: Nil => toRiakValue(x)
+    sendRequest(request).flatMap {
+      case Right(result) =>
+        val riakResponse = result.as(RpbPutResp())
+        val values = riakResponse.`content`.toList
 
-            case l @ (x :: xs) =>
-              val ConflictResolution(resolvedValue, _) = resolver.resolve(l.map(toRiakValue(_)).toSet)
-              resolvedValue
-          }
+        riakResponse.`content`.toList match {
+          // Empty response
+          case Nil       =>
+            throw new BucketOperationFailed(s"Store and fetch of value '$value' for key '$key' in bucket '$bucket' failed: empty response.")
 
-        case Failure(f) => throw new BucketOperationFailed(s"Fetch for key '$key' in bucket '$bucket' produced an unexpected response error '$f'.")
-      }
+          // Single result
+          case v :: Nil  =>
+            Future.successful(toRiakValue(v, extractVClock(riakResponse.`vclock`)))
+
+          // Conflict (multiple values) and there is a VClock to resolve it
+          case _ if riakResponse.`vclock`.isDefined =>
+            resolveConflict(bucket, key, extractVClock(riakResponse.`vclock`).get, values, resolver)
+
+          // No VClock is provided
+          case _         =>
+            throw new BucketOperationFailed(s"Store and fetch of value '$value' for key '$key' in bucket '$bucket' failed: missing VClock field.")
+        }
+
+      case Left(errorMsg) =>
+        throw new BucketOperationFailed(s"Store and fetch of value '$value' for key '$key' in bucket '$bucket' failed due to $errorMsg.")
+    }
+  }
+
+  def store(bucket: String, key: String, value: RiakValue, resolver: RiakConflictsResolver): Future[Unit] = {
+    if (value.data.isEmpty) {
+      throw new BucketOperationFailed("Empty Riak value data provided") // to be consistent with HTTP API behavior.
+    }
+
+    val request = RiakPBRequest(PBCMsgTypes.RpbPutReq, RpbPutReq(`bucket` = bucket, `key` = Some(key),
+      `vclock` = toRpbVClock(value.vclock), `returnBody` = Some(false), content = toRbpContent(value)))
+
+    sendRequest(request).map {
+      case Right(_)       => ()
+      case Left(errorMsg) =>
+        throw new BucketOperationFailed(s"Store of value '$value' for key '$key' in bucket '$bucket' failed due to $errorMsg.")
     }
   }
 
   def delete(bucket: String, key: String): Future[Unit] = {
-    val response: Future[RiakPBResponse] =
-      (clientActor ? RiakPBRequest(PBCMsgTypes.RpbDelReq, RpbDelReq(bucket = bucket, key = key))).mapTo[RiakPBResponse]
+    val request = RiakPBRequest(PBCMsgTypes.RpbDelReq, RpbDelReq(bucket = bucket, key = key))
+    sendRequest(request).map {
+      case Right(result)  => ()
+      case Left(errorMsg) =>
+        throw new BucketOperationFailed(s"Delete for key '$key' in bucket '$bucket' produced an unexpected response code '$errorMsg'.")
+    }
+  }
 
-    response.map { r =>
-      val tryR = responseToTry(r)
-      tryR match {
-        case Success(r) =>
-          require(r.msgType == PBCMsgTypes.RpbDelResp)
+  def getBucketProperties(bucket: String): Future[RiakBucketProperties] = {
+    val request = RiakPBRequest(PBCMsgTypes.RpbGetBucketReq, RpbGetBucketReq(bucket = bucket))
 
-        case Failure(f) => throw new BucketOperationFailed(s"Fetch for key '$key' in bucket '$bucket' produced an unexpected response error '$f'.")
+    sendRequest(request).map {
+      case Right(result)  =>
+        val riakResponse = result.as(RpbGetBucketResp())
+        val props = riakResponse.`props`
+        RiakBucketProperties(allowSiblings = props.`allowMult`.getOrElse(DefaultAllowMult),
+          lastWriteWins = props.`lastWriteWins`.getOrElse(DefaultLastWriteWins), numberOfReplicas = props.`nVal`.getOrElse(DefaultNumberOfReplicas))
+
+      case Left(errorMsg) =>
+        throw new BucketOperationFailed(s"Fetching properties of bucket '$bucket' produced an unexpected response error '$errorMsg'.")
+    }
+  }
+
+  def setBucketProperties(bucket: String, newProperties: Set[RiakBucketProperty[_]]): Future[Unit] = {
+    val request = RiakPBRequest(PBCMsgTypes.RpbSetBucketReq, RpbSetBucketReq(`bucket` = bucket, `props` = toRpbBucketProps(newProperties)))
+
+    sendRequest(request).map {
+      case Right(_)       => ()
+      case Left(errorMsg) =>
+        throw new BucketOperationFailed(s"Setting properties of bucket '$bucket' produced an unexpected response '$errorMsg'.")
+    }
+  }
+
+  // ==========================================================================
+  // Conflict Resolution
+  // ==========================================================================
+
+  private def resolveConflict(bucket: String, key: String, vClock: String,
+                              contentList: List[RpbContent], resolver: RiakConflictsResolver): Future[RiakValue] = {
+    val values = contentList.filterNot(value => value.`deleted`.getOrElse(false)).map(toRiakValue(_, Some(vClock))).toSet
+
+    // Store the resolved value back to Riak and return the resulting RiakValue
+    val ConflictResolution(result, writeBack) = resolver.resolve(values)
+
+    if (writeBack) {
+      storeAndFetch(bucket, key, result, resolver)
+    } else {
+      Future.successful(result)
+    }
+  }
+
+  // ==========================================================================
+  // Request building
+  // ==========================================================================
+
+  private def sendRequest(request: RiakPBRequest): Future[RiakReply] =
+    clientActor.ask(request).mapTo[RiakPBResponse].map(responseToEither)
+
+  // =================================================================================
+  // Helper methods to construct Rpb protocol objects from Riak client domain objects
+  // =================================================================================
+
+  private def toRbpContent(value: RiakValue): RpbContent =
+    new RpbContent().copy(
+      `value`           = value.data,
+      `contentType`     = Some(value.contentType.mediaType.value),
+      `lastMod`         = Some(value.lastModified.getMillis.toInt),
+      `contentEncoding` = Some(value.contentType.charset.value),
+      `vtag`            = toRpbEtag(value.etag),
+      `indexes`         = toRpbPairs(value.indexes))
+
+
+  private def toRpbPairs(indexes: Set[RiakIndex]): Vector[RpbPair] =
+    indexes.map { index =>
+      RpbPair(`key` = index.fullName, `value` = Some(index.value.toString))
+    }.toVector
+
+  private def toRpbVClock(vClock: VClock): Option[PBByteString] =
+    vClock match {
+      case VClock.NotSpecified => None
+      case _                   => Some(PBByteString.copyFrom(base64.decode(vClock.value)))
+    }
+
+  private def toRpbEtag(eTag: ETag): Option[PBByteString] =
+    eTag match {
+      case ETag.NotSpecified => None
+      case _                 => Some(eTag.value)
+    }
+
+  private def toRpbBucketProps(properties: Set[RiakBucketProperty[_]]): RpbBucketProps = {
+    properties.foldLeft(RpbBucketProps()) { (rbProps, newProperty) =>
+      newProperty match {
+        case NumberOfReplicas(n) => rbProps.copy(`nVal` = Some(n))
+        case AllowSiblings(v)    => rbProps.copy(`allowMult` = Some(v))
+        case LastWriteWins(l)    => rbProps.copy(`lastWriteWins` = Some(l))
       }
     }
   }
 
-  def toRiakValue(content: RpbContent): RiakValue = {
-    RiakValue(content.`value`.toStringUtf8,
-      //content.`contentType`, // TDODO content type
-      ContentTypes.NoContentType,
-      content.`vtag`.map(VClock(_)).getOrElse(VClock.NotSpecified),
-      ETag.NotSpecified,
-      currentDateTimeUTC)
-  }
+  // ==========================================================================
+  // Response parsing
+  // ==========================================================================
 
-  def toRbpContent(riakValue: RiakValue): RpbContent =
-    new RpbContent().copy(
-      `value` = riakValue.data,
-      `vtag` = Some(riakValue.vclock.value),
-      `lastMod` = Some(riakValue.lastModified.getMillis.toInt)) // TODO
-}
+  // =================================================================================
+  // Helper methods to construct Riak client domain objects from Rpb protocol objects
+  // =================================================================================
 
-private[riak] final class PBClientActor extends Actor with ActorLogging with Stash {
-  import Tcp._
-  import context.system
-
-  implicit val timeout = Timeout(3.second)
-
-  val remote = new InetSocketAddress("127.0.0.1", 8087)
-  IO(Tcp) ! Connect(remote)
-
-  val stages = new RiakPBPipelineStage >>
-    new LengthFieldFrame(maxSize = 1024 * 1024 * 50, lengthIncludesHeader = false) >>
-    new TcpReadWriteAdapter
-  val init = TcpPipelineHandler.withLogger(log, stages)
-
-  var recipient: ActorRef = _
-
-  def receive = {
-    case Connected(_, _) =>
-      val connection = sender
-      val pipeline = system.actorOf(TcpPipelineHandler.props(init, connection, self).withDeploy(Deploy.local))
-      context become connected(pipeline)
-      connection ! Register(pipeline)
-      unstashAll()
-
-    case CommandFailed(_: Connect) =>
-      log.error("Failed to connect to host.")
-      context stop self
-
-    case r: RiakPBRequest => stash()
-  }
-
-  def connected(pipeline: ActorRef): Receive = {
-    case req: RiakPBRequest  =>
-      recipient = sender
-      pipeline ! init.Command(req)
-
-    case init.Event(r: RiakPBResponse) =>
-      recipient ! r
-      context stop self
-
-    case _: ConnectionClosed =>
-      println("Connection is closed.")
-      context stop self
-  }
-}
-
-class RiakPBPipelineStage extends PipelineStage[PipelineContext, RiakPBRequest, ByteString, RiakPBResponse, ByteString] {
-  import java.nio.ByteOrder
-
-  def apply(ctx: PipelineContext) = new PipePair[RiakPBRequest, ByteString, RiakPBResponse, ByteString] {
-    implicit val order = ByteOrder.BIG_ENDIAN
-
-    val commandPipeline = { req: RiakPBRequest =>
-      val builder = new ByteStringBuilder
-      builder.putByte(PBCMsgTypes.code(req.msgType).toByte)
-      builder ++= req.body
-      ctx.singleCommand(builder.result())
+  private def toRiakValue(content: RpbContent, vClock: Option[String]): RiakValue = {
+    def fromStringToContentType(s: String): ContentType = {
+      import spray.http._
+      spray.http.ContentType(MediaType.custom(s), Some(HttpCharsets.`UTF-8`))
     }
 
-    val eventPipeline = { bs: ByteString =>
-      val iter = bs.iterator
-      ctx.singleEvent(RiakPBResponse(PBCMsgTypes.msgType(iter.getByte), iter.toByteString))
-    }
+    RiakValue(
+      data = content.`value`,
+      contentType  = content.`contentType`.map(bs => fromStringToContentType(bs)).getOrElse(ContentTypes.NoContentType),
+      vclock       = vClock.map(VClock(_)).getOrElse(VClock.NotSpecified),
+      etag         = content.`vtag`.map(ETag(_)).getOrElse(ETag.NotSpecified),
+      lastModified = new DateTime(content.`lastMod`.map(_.toLong).getOrElse(System.currentTimeMillis())),
+      indexes      = toRiakIndexes(content.`indexes`))
   }
-}
 
-sealed trait RiakPBMessage {
-  def msgType: PBCMsgType
-  def body: ByteString
-}
+  private def toRiakIndexes(rpbIndexes: Vector[RpbPair]): Set[RiakIndex] = {
+    def toRiakIndex(rpbPair: RpbPair) = {
+      import RiakIndexSupport._
+      val fullName: String = rpbPair.`key`
+      val value: Option[String] = rpbPair.`value`
 
-case class RiakPBRequest(msgType: PBCMsgType, body: ByteString = ByteString()) extends RiakPBMessage
-case class RiakPBResponse(msgType: PBCMsgType, body: ByteString = ByteString()) extends RiakPBMessage
+      fullName match {
+        case IndexNameAndType(name, LongIndexSuffix)   => RiakLongIndex(name, value.get.toLong)
+        case IndexNameAndType(name, StringIndexSuffix) => RiakStringIndex(name, value.get)
+      }
+    }
 
-sealed trait PBCMsgType
+    rpbIndexes.filter(_.`value`.isDefined)
+              .map(toRiakIndex)
+              .toSet
+  }
 
-object PBCMsgTypes {
-  case object RpbErrorResp extends PBCMsgType // 0
-  case object RpbPingReq extends PBCMsgType // 1
-  case object RpbPingResp extends PBCMsgType // 2
-  case object RpbGetClientIdReq extends PBCMsgType // 3
-  case object RpbGetClientIdResp extends PBCMsgType // 4
-  case object RpbSetClientIdReq extends PBCMsgType // 5
-  case object RpbSetClientIdResp extends PBCMsgType // 6
-  case object RpbGetServerInfoReq extends PBCMsgType // 7
-  case object RpbGetServerInfoResp extends PBCMsgType // 8
-  case object RpbGetReq extends PBCMsgType // 9
-  case object RpbGetResp extends PBCMsgType // 10
-  case object RpbPutReq extends PBCMsgType // 11
-  case object RpbPutResp extends PBCMsgType // 12
-  case object RpbDelReq extends PBCMsgType // 13
-  case object RpbDelResp extends PBCMsgType // 14
-  case object RpbListBucketsReq extends PBCMsgType // 15
-  case object RpbListBucketsResp extends PBCMsgType // 16
-  case object RpbListKeysReq extends PBCMsgType // 17
-  case object RpbListKeysResp extends PBCMsgType // 18
-  case object RpbGetBucketReq extends PBCMsgType // 19
-  case object RpbGetBucketResp extends PBCMsgType // 20
-  case object RpbSetBucketReq extends PBCMsgType // 21
-  case object RpbSetBucketResp extends PBCMsgType // 22
-  case object RpbMapRedReq extends PBCMsgType // 23
-  case object RpbMapRedResp extends PBCMsgType // 24
-  case object RpbIndexReq extends PBCMsgType // 25
-  case object RpbIndexResp extends PBCMsgType // 26
-  case object RpbSearchQueryReq extends PBCMsgType // 27
-  case object RbpSearchQueryResp extends PBCMsgType // 28
-
-  val values = Map[PBCMsgType, Int](
-    RpbErrorResp -> 0,
-    RpbPingReq -> 1,
-    RpbPingResp -> 2,
-    RpbGetClientIdReq -> 3,
-    RpbGetClientIdResp -> 4,
-    RpbSetClientIdReq -> 5,
-    RpbSetClientIdResp -> 6,
-    RpbGetServerInfoReq -> 7,
-    RpbGetServerInfoResp -> 8,
-    RpbGetReq -> 9,
-    RpbGetResp -> 10,
-    RpbPutReq -> 11,
-    RpbPutResp -> 12,
-    RpbDelReq -> 13,
-    RpbDelResp -> 14,
-    RpbListBucketsReq -> 15,
-    RpbListBucketsResp -> 16,
-    RpbListKeysReq -> 17,
-    RpbListKeysResp -> 18,
-    RpbGetBucketReq -> 19,
-    RpbGetBucketResp -> 20,
-    RpbSetBucketReq -> 21,
-    RpbSetBucketResp -> 22,
-    RpbMapRedReq -> 23,
-    RpbMapRedResp -> 24,
-    RpbIndexReq -> 25,
-    RpbIndexResp -> 26,
-    RpbSearchQueryReq -> 27,
-    RbpSearchQueryResp -> 28)
-
-  def code(t: PBCMsgType): Int = values(t)
-
-  def msgType(code: Int): PBCMsgType = values.toList.find(_._2 == code).map(_._1).getOrElse(throw new IllegalArgumentException("PDC code not found"))
+  private def extractVClock(vClock: Option[PBByteString]): Option[String] =
+    vClock.map(_.toByteArray).map(base64.encodeToString(_, false))
 }

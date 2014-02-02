@@ -14,17 +14,19 @@
  * limitations under the License.
  */
 
-package com.scalapenos.riak.internal.protobuf.serialization
+package com.scalapenos.riak
+package internal
+
+package protobuf
+package serialization
 
 import com.google.protobuf.{ByteString => PBByteString, CodedOutputStream, MessageLite}
+import com.basho.riak.protobuf.{Message, RpbErrorResp}
+
 import java.io.ByteArrayOutputStream
-import com.basho.riak.protobuf.{RpbErrorResp, Message}
-import akka.util.ByteString
-import com.scalapenos.riak.internal.protobuf.{PBCMsgTypes, RiakPBResponse}
-import scala.util.Try
-import java.lang.Exception
 
 object PBConversions {
+  import akka.util.ByteString
 
   implicit def messageToByteString[T <: MessageLite with MessageLite.Builder](m: Message[T]) = {
     val os = new ByteArrayOutputStream()
@@ -35,16 +37,20 @@ object PBConversions {
     ByteString(os.toByteArray)
   }
 
-  implicit def stringToByteString(s: String): PBByteString = PBByteString.copyFromUtf8(s)
+  implicit def stringToByteString(string: String): PBByteString = PBByteString.copyFromUtf8(string)
 
-  implicit def byteStringToString(s: PBByteString): String = s.toStringUtf8
+  implicit def byteStringToString(byteString: PBByteString): String = byteString.toStringUtf8
 
-  def responseToTry(r: RiakPBResponse): Try[RiakPBResponse] =
-    r.msgType match {
-      case PBCMsgTypes.RpbErrorResp =>
-        val e = new Exception(RpbErrorResp().mergeFrom(r.body.toArray).errmsg)
-        scala.util.Failure(e)
+  implicit def optionByteStringToOptionString(byteStringOpt: Option[PBByteString]): Option[String] = byteStringOpt.map(byteStringToString)
 
-      case _                        => scala.util.Success(r)
+  /**
+   * Wraps a response to Either monad base on it's message type.
+   * @param response a Riak PB response to convert.
+   * @return a `Left[String]` with error msg if response message type is Error or Right[RiakPBResponse] in other case.
+   */
+  def responseToEither(response: RiakPBResponse): Either[String, RiakPBResponse] =
+    response.msgType match {
+      case PBCMsgTypes.RpbErrorResp => Left(RpbErrorResp().mergeFrom(response.body.toArray).errmsg)
+      case _                        => Right(response)
     }
 }
