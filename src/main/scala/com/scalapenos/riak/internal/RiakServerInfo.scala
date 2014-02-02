@@ -22,8 +22,9 @@ package internal
 // RiakServerInfo - a nice way to encode the Riak server properties
 // ============================================================================
 
-private[riak] class RiakServerInfo(val host: String, val port: Int, val pathPrefix: String = "", val useSSL: Boolean = false) {
-  val protocol = if (useSSL) "https" else "http"
+private[riak] class RiakServerInfo(val host: String, val httpPort: Int, val pathPrefix: String = "",
+                                   val useSSL: Boolean = false, val pbPort: Int) {
+  val scheme = if (useSSL) "https" else "http"
 }
 
 private[riak] object RiakServerInfo {
@@ -36,6 +37,6 @@ private[riak] object RiakServerInfo {
     url.getPath,
     url.getProtocol.toLowerCase == "https")
 
-  def apply(host: String, port: Int, pathPrefix: String = "", useSSL: Boolean = false): RiakServerInfo =
-    new RiakServerInfo(host, port, pathPrefix.dropWhile(_ == '/'), useSSL)
+  def apply(host: String, httpPort: Int, pathPrefix: String = "", useSSL: Boolean = false, pbPort: Int = 8087): RiakServerInfo =
+    new RiakServerInfo(host, httpPort, pathPrefix.dropWhile(_ == '/'), useSSL, pbPort)
 }

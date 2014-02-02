@@ -25,7 +25,7 @@ class RiakServerInfoSpec extends Specification {
       val info = RiakServerInfo("arthur", 4242)
 
       info.host mustEqual "arthur"
-      info.port mustEqual 4242
+      info.httpPort mustEqual 4242
       info.pathPrefix mustEqual ""
       info.useSSL should beFalse
     }
@@ -34,7 +34,7 @@ class RiakServerInfoSpec extends Specification {
       val info = RiakServerInfo("ford", 9098, "prefect")
 
       info.host mustEqual "ford"
-      info.port mustEqual 9098
+      info.httpPort mustEqual 9098
       info.pathPrefix mustEqual "prefect"
       info.useSSL should beFalse
     }
@@ -43,7 +43,7 @@ class RiakServerInfoSpec extends Specification {
       val info = RiakServerInfo("zaphod", 1066, "/Beeblebrox", true)
 
       info.host mustEqual "zaphod"
-      info.port mustEqual 1066
+      info.httpPort mustEqual 1066
       info.pathPrefix mustEqual "Beeblebrox"
       info.useSSL should beTrue
     }
@@ -52,7 +52,7 @@ class RiakServerInfoSpec extends Specification {
       val info = RiakServerInfo("http://trillian/")
 
       info.host mustEqual "trillian"
-      info.port mustEqual 80
+      info.httpPort mustEqual 80
       info.pathPrefix mustEqual ""
       info.useSSL should beFalse
     }
@@ -61,7 +61,7 @@ class RiakServerInfoSpec extends Specification {
       val info = RiakServerInfo("http://trillian:1973/")
 
       info.host mustEqual "trillian"
-      info.port mustEqual 1973
+      info.httpPort mustEqual 1973
       info.pathPrefix mustEqual ""
       info.useSSL should beFalse
     }
@@ -70,7 +70,7 @@ class RiakServerInfoSpec extends Specification {
       val info = RiakServerInfo("http://marvin:2007/depressed")
 
       info.host mustEqual "marvin"
-      info.port mustEqual 2007
+      info.httpPort mustEqual 2007
       info.pathPrefix mustEqual "depressed"
       info.useSSL should beFalse
     }
@@ -79,7 +79,7 @@ class RiakServerInfoSpec extends Specification {
       val info = RiakServerInfo("https://marvin/depressed")
 
       info.host mustEqual "marvin"
-      info.port mustEqual 443
+      info.httpPort mustEqual 443
       info.pathPrefix mustEqual "depressed"
       info.useSSL should beTrue
     }
@@ -88,7 +88,7 @@ class RiakServerInfoSpec extends Specification {
       val info = RiakServerInfo("https://marvin:2007/depressed")
 
       info.host mustEqual "marvin"
-      info.port mustEqual 2007
+      info.httpPort mustEqual 2007
       info.pathPrefix mustEqual "depressed"
       info.useSSL should beTrue
     }

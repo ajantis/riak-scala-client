@@ -61,9 +61,9 @@ private[riak] trait RiakUriSupport {
 
   private def uri(server: RiakServerInfo, path: String, query: Query = Query.Empty): Uri = {
     Uri.from(
-      scheme = server.protocol,
+      scheme = server.scheme,
       host = server.host,
-      port = server.port,
+      port = server.httpPort,
       path = if (server.pathPrefix.isEmpty) s"/$path" else s"/${server.pathPrefix}/$path",
       query = query
     )
