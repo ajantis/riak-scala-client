@@ -10,7 +10,7 @@ import org.specs2.execute.{Failure, FailureException}
 import org.specs2.specification.{Fragments, Step}
 import org.specs2.time.NoTimeConversions
 
-import Protocol.ProtoBuf
+import com.scalapenos.riak.Protocol.{Http, ProtoBuf}
 
 trait AkkaActorSystemSpecification extends Specification with NoTimeConversions {
   implicit val system = ActorSystem("tests")
@@ -23,18 +23,35 @@ trait AkkaActorSystemSpecification extends Specification with NoTimeConversions 
   def failTest(msg: String) = throw new FailureException(Failure(msg))
 
   /* Add a final step to the list of test fragments that shuts down the actor system. */
-  override def map(fs: => Fragments) = super.map(fs).add(Step(system.shutdown))
+  override def map(fs: => Fragments) = super.map(fs).add(Step(cleanup()))
+
+  def cleanup() {
+    system.shutdown()
+  }
 }
 
-
 trait RiakClientSpecification extends AkkaActorSystemSpecification with Before {
+  var protocolsUnderTest: List[Protocol] = List(Http, ProtoBuf)
   var client: RiakClient = _
 
   def before {
-    client = RiakClient(system, protocol = ProtoBuf)
+    nextClientProtocol()
   }
 
+  override def map(fs: => Fragments) = super.map(fs).add(Step(nextClientProtocol())).add(super.map(fs)).add(Step(cleanupAllStages()))
+
   skipAllUnless(RiakClient(system).ping.await)
+
+  def nextClientProtocol() {
+    client = RiakClient(system, protocol = protocolsUnderTest.head)
+    protocolsUnderTest = protocolsUnderTest.tail
+  }
+
+  override def cleanup() {}
+
+  def cleanupAllStages() {
+    system.shutdown()
+  }
 }
 
 
