@@ -18,6 +18,7 @@ package com.scalapenos.riak
 package internal
 
 import com.typesafe.config.Config
+import scala.concurrent.duration._
 
 
 private[riak] class RiakClientSettings(config: Config) {
@@ -34,6 +35,35 @@ private[riak] class RiakClientSettings(config: Config) {
    */
   final val AddClientIdHeader: Boolean = config.getBoolean("riak.add-client-id-header")
 
+  /**
+   * Default timeout to use for futures.
+   */
+  final val DefaultFutureTimeout = FiniteDuration(config.getMilliseconds("timeouts.default-future-timeout"), MILLISECONDS)
+
+  /**
+   * Minimum number of allowed protobuf connections.
+   */
+  final val MinNumberProtobufConnections = config.getInt("protobuf.min-concurrent-connections")
+
+  /**
+   * Maximum number of allowed protobuf connections.
+   */
+  final val MaxNumberProtobufConnections = config.getInt("protobuf.max-concurrent-connections")
+
+  /**
+   * Number of requests queued to Protobuf client before resizing connections pool.
+   */
+  final val ProtobufQueueBeforeResizingPool = config.getInt("protobuf.queue-before-resizing-pool")
+
+  /**
+   * Number of connections retries for Protobuf client.
+   */
+  final val MaxNumberOfProtobufRetries = config.getInt("protobuf.max-retries")
+
+  /**
+   * Timeout after which Protobuf idle connections are expired.
+   */
+  final val ProtobufConnectionIdleTimeout = FiniteDuration(config.getMilliseconds("protobuf.connection-idle-timeout"), MILLISECONDS)
 
   // TODO: add setting for silently ignoring indexes on backends that don't allow them. The alternative is failing/throwing exceptions
 
