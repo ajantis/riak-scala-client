@@ -30,16 +30,22 @@ object RiakClient {
 
   private lazy val internalSystem = ActorSystem("riak-client")
 
-  def apply()                                                                  : RiakClient = RiakClientExtension(internalSystem).connect(defaultHost, Http)
-  def apply(protocol: Protocol)                                                : RiakClient = RiakClientExtension(internalSystem).connect(defaultHost, protocol)
-  def apply(host: String, port: Int, protocol: Protocol)                       : RiakClient = RiakClientExtension(internalSystem).connect(host, port, protocol)
-  def apply(url: String, protocol: Protocol)                                   : RiakClient = RiakClientExtension(internalSystem).connect(url, protocol)
-  def apply(url: java.net.URL, protocol: Protocol)                             : RiakClient = RiakClientExtension(internalSystem).connect(url, protocol)
+  def apply()                                                                 : RiakClient = RiakClientExtension(internalSystem).connect(defaultHost, Http)
+  def apply(protocol: Protocol)                                               : RiakClient = RiakClientExtension(internalSystem).connect(defaultHost, protocol)
+  def apply(host: String, port: Int)                                          : RiakClient = RiakClientExtension(internalSystem).connect(host, port, Http)
+  def apply(host: String, port: Int, protocol: Protocol)                      : RiakClient = RiakClientExtension(internalSystem).connect(host, port, protocol)
+  def apply(url: String)                                                      : RiakClient = RiakClientExtension(internalSystem).connect(url, Http)
+  def apply(url: String, protocol: Protocol)                                  : RiakClient = RiakClientExtension(internalSystem).connect(url, protocol)
+  def apply(url: java.net.URL)                                                : RiakClient = RiakClientExtension(internalSystem).connect(url, Http)
 
-  def apply(system: ActorSystem, protocol: Protocol = Http)                    : RiakClient = RiakClientExtension(system).connect(defaultHost, protocol)
-  def apply(system: ActorSystem, host: String, port: Int, protocol: Protocol)  : RiakClient = RiakClientExtension(system).connect(host, port, protocol)
-  def apply(system: ActorSystem, url: String, protocol: Protocol)              : RiakClient = RiakClientExtension(system).connect(url, protocol)
-  def apply(system: ActorSystem, url: java.net.URL, protocol: Protocol)        : RiakClient = RiakClientExtension(system).connect(url, protocol)
+  def apply(system: ActorSystem)                                              : RiakClient = RiakClientExtension(system).connect(defaultHost, Http)
+  def apply(system: ActorSystem, protocol: Protocol)                          : RiakClient = RiakClientExtension(system).connect(defaultHost, protocol)
+  def apply(system: ActorSystem, host: String, port: Int)                     : RiakClient = RiakClientExtension(system).connect(host, port, Http)
+  def apply(system: ActorSystem, host: String, port: Int, protocol: Protocol) : RiakClient = RiakClientExtension(system).connect(host, port, protocol)
+  def apply(system: ActorSystem, url: String)                                 : RiakClient = RiakClientExtension(system).connect(url, Http)
+  def apply(system: ActorSystem, url: String, protocol: Protocol)             : RiakClient = RiakClientExtension(system).connect(url, protocol)
+  def apply(system: ActorSystem, url: java.net.URL)                           : RiakClient = RiakClientExtension(system).connect(url, Http)
+  def apply(system: ActorSystem, url: java.net.URL, protocol: Protocol)       : RiakClient = RiakClientExtension(system).connect(url, protocol)
 
 }
 
