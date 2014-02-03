@@ -17,7 +17,7 @@ is not backwards compatible with RC1 and therefor not compatible with Spray 1.2-
 
 ## Features
 
-So far, the following Riak (http) API features are supported:
+So far, the following Riak API features are supported:
 
 - Fetch
 - Store
@@ -28,6 +28,9 @@ So far, the following Riak (http) API features are supported:
     - Storing with indexes
 - Getting/setting bucket properties
 - ping
+
+These features are supported for both Riak APIs: HTTP and Protobuf.
+HTTP API is used by default. Protocol buffers API support is experimental.
 
 Other features include:
 
@@ -53,8 +56,7 @@ The following Riak (http) API features are still under construction:
   If-Modified-Since and If-Unmodified-Since for LastModified)
 - Node Status
 
-The initial focus is on supporting the Riak HTTP API. Protobuf support might be added
-later but it has a low priority at the moment.
+The initial focus is on supporting the Riak HTTP API. Protobuf support is experimental.
 
 The riak-scala-client has been tested against [Riak] versions 1.2.x and 1.3.x.
 
