@@ -199,8 +199,9 @@ private[riak] final class RiakPBClientHelper(system: ActorSystem, server: RiakSe
       case Right(result)  =>
         val riakResponse = result.as(RpbGetBucketResp())
         val props = riakResponse.`props`
-        RiakBucketProperties(allowSiblings = props.`allowMult`.getOrElse(DefaultAllowMult),
-          lastWriteWins = props.`lastWriteWins`.getOrElse(DefaultLastWriteWins), numberOfReplicas = props.`nVal`.getOrElse(DefaultNumberOfReplicas))
+        RiakBucketProperties(allowSiblings    = props.`allowMult`.getOrElse(DefaultAllowMult),
+                             lastWriteWins    = props.`lastWriteWins`.getOrElse(DefaultLastWriteWins),
+                             numberOfReplicas = props.`nVal`.getOrElse(DefaultNumberOfReplicas))
 
       case Left(errorMsg) =>
         throw new BucketOperationFailed(s"Fetching properties of bucket '$bucket' produced an unexpected response error '$errorMsg'.")
