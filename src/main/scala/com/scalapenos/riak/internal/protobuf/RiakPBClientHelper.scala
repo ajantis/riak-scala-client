@@ -34,6 +34,7 @@ import org.parboiled.common.Base64
 import com.basho.riak.protobuf._
 import com.google.protobuf.{ByteString => PBByteString}
 
+import DateTimeSupport._
 
 import scala.concurrent.duration._
 
@@ -296,13 +297,12 @@ private[riak] final class RiakPBClientHelper(system: ActorSystem, server: RiakSe
       spray.http.ContentType(MediaType.custom(s), Some(HttpCharsets.`UTF-8`))
     }
 
-    RiakValue(
-      data = content.`value`,
-      contentType  = content.`contentType`.map(bs => fromStringToContentType(bs)).getOrElse(ContentTypes.NoContentType),
-      vclock       = vClock.map(VClock(_)).getOrElse(VClock.NotSpecified),
-      etag         = content.`vtag`.map(ETag(_)).getOrElse(ETag.NotSpecified),
-      lastModified = new DateTime(content.`lastMod`.map(_.toLong).getOrElse(System.currentTimeMillis())),
-      indexes      = toRiakIndexes(content.`indexes`))
+    RiakValue(data         = content.`value`,
+              contentType  = content.`contentType`.map(bs => fromStringToContentType(bs)).getOrElse(ContentTypes.NoContentType),
+              vclock       = vClock.map(VClock(_)).getOrElse(VClock.NotSpecified),
+              etag         = content.`vtag`.map(ETag(_)).getOrElse(ETag.NotSpecified),
+              lastModified = content.`lastMod`.map(l => dateTimeUTC(l.toLong)).getOrElse(currentDateTimeUTC),
+              indexes      = toRiakIndexes(content.`indexes`))
   }
 
   private def toRiakIndexes(rpbIndexes: Vector[RpbPair]): Set[RiakIndex] = {
