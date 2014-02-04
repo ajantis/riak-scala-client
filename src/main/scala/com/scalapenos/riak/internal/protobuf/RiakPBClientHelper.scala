@@ -22,6 +22,8 @@ package protobuf
 import akka.actor._
 import akka.util.Timeout
 import akka.pattern.ask
+import akka.routing.{DefaultResizer, RoundRobinRouter}
+import akka.actor.SupervisorStrategy.Restart
 
 import scala.concurrent.Future
 import scala.util.{Left, Right}
@@ -31,8 +33,7 @@ import org.parboiled.common.Base64
 
 import com.basho.riak.protobuf._
 import com.google.protobuf.{ByteString => PBByteString}
-import akka.routing.{DefaultResizer, RoundRobinRouter}
-import akka.actor.SupervisorStrategy.{Resume, Restart}
+
 
 import scala.concurrent.duration._
 
